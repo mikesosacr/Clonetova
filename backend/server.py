@@ -433,6 +433,160 @@ async def delete_stream(stream_id: str, current_user: User = Depends(get_current
     await db.streams.delete_one({"id": stream_id})
     return {"message": "Stream deleted successfully"}
 
+# Media Routes
+@api_router.get("/media", response_model=List[MediaTrack])
+async def get_media(current_user: User = Depends(get_current_user)):
+    tracks = await db.media.find().to_list(1000)
+    return [MediaTrack(**track) for track in tracks]
+
+@api_router.post("/media/upload")
+async def upload_media(files: List[UploadFile] = File(...), current_user: User = Depends(get_current_user)):
+    uploaded_files = []
+    media_dir = Path("/app/media")
+    media_dir.mkdir(exist_ok=True)
+    
+    for file in files:
+        if not file.filename.lower().endswith(('.mp3', '.wav', '.flac', '.aac', '.ogg')):
+            continue
+            
+        file_id = str(uuid.uuid4())
+        file_ext = Path(file.filename).suffix
+        new_filename = f"{file_id}{file_ext}"
+        file_path = media_dir / new_filename
+        
+        # Save file
+        async with aiofiles.open(file_path, 'wb') as f:
+            content = await file.read()
+            await f.write(content)
+        
+        # Create media record
+        media_track = {
+            "id": file_id,
+            "filename": file.filename,
+            "title": Path(file.filename).stem,
+            "file_path": str(file_path),
+            "file_size": len(content),
+            "uploaded_at": datetime.utcnow()
+        }
+        
+        await db.media.insert_one(media_track)
+        uploaded_files.append(MediaTrack(**media_track))
+    
+    return {"message": f"Uploaded {len(uploaded_files)} files", "files": uploaded_files}
+
+@api_router.delete("/media/{track_id}")
+async def delete_media(track_id: str, current_user: User = Depends(get_current_user)):
+    track = await db.media.find_one({"id": track_id})
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+    
+    # Delete file
+    try:
+        Path(track["file_path"]).unlink(missing_ok=True)
+    except Exception as e:
+        logging.error(f"Failed to delete file {track['file_path']}: {e}")
+    
+    await db.media.delete_one({"id": track_id})
+    return {"message": "Track deleted successfully"}
+
+# AutoDJ Routes
+@api_router.get("/autodj/playlists", response_model=List[Playlist])
+async def get_playlists(current_user: User = Depends(get_current_user)):
+    playlists = await db.playlists.find().to_list(1000)
+    return [Playlist(**playlist) for playlist in playlists]
+
+@api_router.post("/autodj/playlists", response_model=Playlist)
+async def create_playlist(playlist_data: dict, current_user: User = Depends(get_current_user)):
+    playlist_dict = playlist_data
+    playlist_dict["id"] = str(uuid.uuid4())
+    playlist_dict["created_at"] = datetime.utcnow()
+    
+    await db.playlists.insert_one(playlist_dict)
+    return Playlist(**playlist_dict)
+
+@api_router.post("/autodj/playlists/{playlist_id}/enable")
+async def enable_playlist(playlist_id: str, current_user: User = Depends(get_current_user)):
+    await db.playlists.update_one(
+        {"id": playlist_id},
+        {"$set": {"enabled": True}}
+    )
+    return {"message": "Playlist enabled"}
+
+@api_router.post("/autodj/playlists/{playlist_id}/disable")
+async def disable_playlist(playlist_id: str, current_user: User = Depends(get_current_user)):
+    await db.playlists.update_one(
+        {"id": playlist_id},
+        {"$set": {"enabled": False}}
+    )
+    return {"message": "Playlist disabled"}
+
+@api_router.delete("/autodj/playlists/{playlist_id}")
+async def delete_playlist(playlist_id: str, current_user: User = Depends(get_current_user)):
+    await db.playlists.delete_one({"id": playlist_id})
+    return {"message": "Playlist deleted successfully"}
+
+# Statistics Routes
+@api_router.get("/statistics")
+async def get_statistics(range: str = "24h", current_user: User = Depends(get_current_user)):
+    # Mock statistics data
+    return {
+        "peakListeners": 45,
+        "avgListeners": 28,
+        "totalSessions": 156,
+        "uniqueCountries": 12,
+        "range": range
+    }
+
+# User Management Routes
+@api_router.get("/users", response_model=List[User])
+async def get_users(current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    users = await db.users.find({}, {"password": 0}).to_list(1000)
+    return [User(**user) for user in users]
+
+@api_router.post("/users", response_model=User)
+async def create_user(user_data: UserCreate, current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    existing_user = await db.users.find_one({"email": user_data.email})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already exists")
+    
+    user_dict = user_data.dict()
+    user_dict["password"] = get_password_hash(user_dict["password"])
+    user_dict["id"] = str(uuid.uuid4())
+    user_dict["created_at"] = datetime.utcnow()
+    
+    await db.users.insert_one(user_dict)
+    return User(**user_dict)
+
+# Settings Routes
+@api_router.get("/settings")
+async def get_settings(current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Return mock settings
+    return {
+        "serverName": "CentovaCast Server",
+        "adminEmail": "admin@centovacast.local",
+        "enableRegistration": True,
+        "defaultBitrate": 128,
+        "maxStreams": 10,
+        "enableAutoDJ": True
+    }
+
+@api_router.put("/settings")
+async def update_settings(settings: dict, current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # In a real implementation, this would save to database
+    return {"message": "Settings updated successfully"}
+
 # Include router
 app.include_router(api_router)
 
