@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Upload, Music, Search, Play, Pause, Trash2, List, Grid, X } from 'lucide-react';
+import { usePlayer } from '../contexts/PlayerContext';
+import { Upload, Music, Search, Play, Pause, Trash2, List, Grid } from 'lucide-react';
 import { toast } from '../hooks/use-toast';
 
 const formatDuration = (s) => {
@@ -17,7 +18,7 @@ const formatSize = (b) => {
 const MediaLibrary = () => {
   const { api } = useAuth();
   const fileInputRef = useRef();
-  const audioRef = useRef();
+  const { playTrack, currentTrack, isPlaying } = usePlayer();
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -31,21 +32,6 @@ const MediaLibrary = () => {
 
   useEffect(() => { fetchTracks(); }, []);
 
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const onTime = () => setCurrentTime(audio.currentTime);
-    const onDur = () => setDuration(audio.duration);
-    const onEnd = () => { setIsPlaying(false); setCurrentTime(0); };
-    audio.addEventListener('timeupdate', onTime);
-    audio.addEventListener('loadedmetadata', onDur);
-    audio.addEventListener('ended', onEnd);
-    return () => {
-      audio.removeEventListener('timeupdate', onTime);
-      audio.removeEventListener('loadedmetadata', onDur);
-      audio.removeEventListener('ended', onEnd);
-    };
-  }, [currentTrack]);
 
   const fetchTracks = async () => {
     try {
@@ -84,8 +70,8 @@ const MediaLibrary = () => {
     setCurrentTrack(track);
     setIsPlaying(false);
     setCurrentTime(0);
-    const token = localStorage.getItem('token');
-    audio.src = `/api/media/${track.id}/stream?token=${localStorage.getItem("token") || ""}`?token=${token}` : ''}`;
+    const token = localStorage.getItem('token') || '';
+    audio.src = `/api/media/${track.id}/stream?token=${token}`;
     audio.load();
     try { await audio.play(); setIsPlaying(true); }
     catch (e) { toast({ title: "Error", description: "No se pudo reproducir el archivo", variant: "destructive" }); }
@@ -128,8 +114,7 @@ const MediaLibrary = () => {
 
   return (
     <div className="space-y-6">
-      <audio ref={audioRef} />
-
+      
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -158,35 +143,7 @@ const MediaLibrary = () => {
       )}
 
       {/* Player */}
-      {currentTrack && (
-        <div className="bg-gradient-to-r from-slate-800 to-slate-700 text-white rounded-xl p-4">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-orange-500 rounded-lg flex items-center justify-center flex-shrink-0">
-              <Music className="w-6 h-6" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold truncate">{currentTrack.title}</p>
-              <p className="text-sm text-slate-300 truncate">{currentTrack.artist || 'Artista desconocido'}</p>
-              <div className="flex items-center gap-2 mt-2">
-                <span className="text-xs text-slate-400">{formatDuration(currentTime)}</span>
-                <div className="flex-1 bg-slate-600 rounded-full h-1.5 cursor-pointer" onClick={seek}>
-                  <div className="bg-orange-500 h-1.5 rounded-full" style={{width: duration ? `${(currentTime/duration)*100}%` : '0%'}} />
-                </div>
-                <span className="text-xs text-slate-400">{formatDuration(duration || currentTrack.duration)}</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => playTrack(currentTrack)}
-                className="w-10 h-10 bg-orange-500 hover:bg-orange-600 rounded-full flex items-center justify-center">
-                {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
-              </button>
-              <button onClick={stopPlayer} className="w-8 h-8 bg-slate-600 hover:bg-slate-500 rounded-full flex items-center justify-center">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* Controls */}
       <div className="flex items-center justify-between bg-white border border-gray-200 rounded-xl p-4">

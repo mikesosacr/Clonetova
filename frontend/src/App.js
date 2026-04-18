@@ -13,6 +13,8 @@ import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import { Toaster } from './components/ui/toaster';
 import './App.css';
+import MiniPlayer from './components/MiniPlayer';
+import { PlayerProvider } from './contexts/PlayerContext';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -32,7 +34,7 @@ const AppLayout = ({ children }) => {
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header />
-        <main className="flex-1 overflow-auto p-6">
+        <main className="flex-1 overflow-auto p-6 pb-20">
           {children}
         </main>
       </div>
@@ -43,6 +45,7 @@ const AppLayout = ({ children }) => {
 function App() {
   return (
     <AuthProvider>
+      <PlayerProvider>
       <BrowserRouter>
         <div className="App">
           <Routes>
@@ -97,9 +100,11 @@ function App() {
               </ProtectedRoute>
             } />
           </Routes>
+          <MiniPlayer />
           <Toaster />
         </div>
       </BrowserRouter>
+      </PlayerProvider>
     </AuthProvider>
   );
 }
