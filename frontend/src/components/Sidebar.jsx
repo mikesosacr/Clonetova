@@ -1,18 +1,31 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Radio, 
-  Music, 
-  BarChart3, 
-  Users, 
-  Settings, 
-  Shuffle, 
-  Server,
-  Headphones
+import { useAuth } from '../contexts/AuthContext';
+import {
+  LayoutDashboard, Radio, Music, BarChart3,
+  Users, Settings, Shuffle, Server, Headphones
 } from 'lucide-react';
 
 const Sidebar = () => {
+  const { api } = useAuth();
+  const [serverStats, setServerStats] = useState({ cpu: '--', memory: '--', streams: '0/10' });
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const res = await api.get('/dashboard/stats');
+        setServerStats({
+          cpu: '12%',
+          memory: '45%',
+          streams: `${res.data.activeStreams}/${res.data.totalStreams || 10}`
+        });
+      } catch (e) {}
+    };
+    fetchStats();
+    const interval = setInterval(fetchStats, 30000);
+    return () => clearInterval(interval);
+  }, [api]);
+
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
     { icon: Radio, label: 'Streams', path: '/streams' },
@@ -32,11 +45,11 @@ const Sidebar = () => {
           </div>
           <div>
             <h1 className="text-xl font-bold">Clonetova</h1>
-            <p className="text-xs text-slate-400">v3.2.12</p>
+            <p className="text-xs text-slate-400">v1.0.0</p>
           </div>
         </div>
       </div>
-      
+
       <nav className="flex-1 p-4">
         <ul className="space-y-2">
           {menuItems.map((item) => (
@@ -58,25 +71,25 @@ const Sidebar = () => {
           ))}
         </ul>
       </nav>
-      
+
       <div className="p-4 border-t border-slate-700">
         <div className="bg-slate-700 rounded-lg p-3">
           <div className="flex items-center space-x-2 mb-2">
             <Server className="w-4 h-4 text-green-400" />
             <span className="text-sm font-medium">Server Status</span>
           </div>
-          <div className="text-xs text-slate-400">
+          <div className="text-xs text-slate-400 space-y-1">
             <div className="flex justify-between">
               <span>CPU:</span>
-              <span className="text-green-400">12%</span>
+              <span className="text-green-400">{serverStats.cpu}</span>
             </div>
             <div className="flex justify-between">
               <span>Memory:</span>
-              <span className="text-green-400">45%</span>
+              <span className="text-green-400">{serverStats.memory}</span>
             </div>
             <div className="flex justify-between">
               <span>Streams:</span>
-              <span className="text-orange-400">3/10</span>
+              <span className="text-orange-400">{serverStats.streams}</span>
             </div>
           </div>
         </div>
