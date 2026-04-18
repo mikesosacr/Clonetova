@@ -1,15 +1,25 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 
 const AuthContext = createContext();
+const API_BASE_URL = 'http://141.148.179.210:8001';
 
-const API_BASE_URL = process.env.REACT_APP_BACKEND_URL;
+// Instancia global estable de axios
+const api = axios.create({
+  baseURL: `${API_BASE_URL}/api`,
+});
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };
 
@@ -17,21 +27,6 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Set up axios defaults
-  const api = axios.create({
-    baseURL: `${API_BASE_URL}/api`,
-  });
-
-  // Add token to requests
-  api.interceptors.request.use((config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  });
-
-  // Handle token expiration
   api.interceptors.response.use(
     (response) => response,
     (error) => {
@@ -46,13 +41,13 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
-      validateToken(token);
+      validateToken();
     } else {
       setLoading(false);
     }
   }, []);
 
-  const validateToken = async (token) => {
+  const validateToken = async () => {
     try {
       const response = await api.get('/auth/me');
       setUser(response.data);
@@ -66,14 +61,14 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const response = await api.post('/auth/login', { email, password });
-      const { token, user: userData } = response.data;
+      const { access_token: token, user: userData } = response.data;
       localStorage.setItem('token', token);
       setUser(userData);
       return { success: true };
     } catch (error) {
-      return { 
-        success: false, 
-        error: error.response?.data?.message || 'Login failed' 
+      return {
+        success: false,
+        error: error.response?.data?.message || 'Login failed'
       };
     }
   };
@@ -88,21 +83,16 @@ export const AuthProvider = ({ children }) => {
       const response = await api.post('/auth/register', userData);
       return { success: true, data: response.data };
     } catch (error) {
-      return { 
-        success: false, 
-        error: error.response?.data?.message || 'Registration failed' 
+      return {
+        success: false,
+        error: error.response?.data?.message || 'Registration failed'
       };
     }
   };
 
-  const value = {
-    user,
-    login,
-    logout,
-    register,
-    loading,
-    api
-  };
+  const value = useMemo(() => ({
+    user, login, logout, register, loading, api
+  }), [user, loading]);
 
   return (
     <AuthContext.Provider value={value}>

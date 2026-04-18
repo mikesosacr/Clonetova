@@ -34,7 +34,7 @@ try:
     client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
     db = client[os.environ['DB_NAME']]
     # Test connection
-    asyncio.get_event_loop().run_until_complete(client.admin.command('ping'))
+    client.get_io_loop()  # lazy connection, verified on startup
     USE_MOCK_DB = False
     logging.info("Connected to MongoDB")
 except Exception as e:
@@ -484,7 +484,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         {"$match": {"status": "online"}},
         {"$group": {"_id": None, "total": {"$sum": "$current_listeners"}}}
     ]
-    cursor = await db.streams.aggregate(pipeline)
+    cursor = db.streams.aggregate(pipeline)
     result = await cursor.to_list(1)
     total_listeners = result[0]["total"] if result else 0
     
@@ -744,8 +744,16 @@ app.include_router(api_router)
 
 @app.on_event("startup")
 async def startup_event():
+    global db, USE_MOCK_DB
+    try:
+        await client.admin.command("ping")
+        USE_MOCK_DB = False
+        logging.info("Connected to MongoDB successfully")
+    except Exception as e:
+        logging.warning(f"MongoDB not available ({e}), using mock")
+        USE_MOCK_DB = True
     await init_default_user()
-    logging.info("CentovaCast server started")
+    logging.info("Clonetova server started")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

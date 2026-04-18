@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mongodb:
     image: mongo:5.0
@@ -18,7 +16,7 @@ services:
       - centovacast-network
 
   backend:
-    build: 
+    build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: centovacast-backend
@@ -26,7 +24,7 @@ services:
     environment:
       MONGO_URL: mongodb://centovacast:centovacast123@mongodb:27017/centovacast
       DB_NAME: centovacast
-      SECRET_KEY: your-production-secret-key-change-this
+      SECRET_KEY: $(openssl rand -hex 32)
     volumes:
       - media_files:/app/media
       - stream_configs:/app/streams
@@ -43,8 +41,6 @@ services:
       dockerfile: Dockerfile
     container_name: centovacast-frontend
     restart: unless-stopped
-    environment:
-      REACT_APP_BACKEND_URL: http://localhost:8001
     ports:
       - "3000:3000"
     depends_on:
@@ -58,11 +54,8 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-      - media_files:/var/www/media:ro
     depends_on:
       - frontend
       - backend
@@ -70,18 +63,11 @@ services:
       - centovacast-network
 
   icecast:
-    image: moul/icecast
+    image: deepcomp/icecast2
     container_name: centovacast-icecast
     restart: unless-stopped
-    environment:
-      ICECAST_SOURCE_PASSWORD: icecast123
-      ICECAST_ADMIN_PASSWORD: icecast123
-      ICECAST_RELAY_PASSWORD: icecast123
-      ICECAST_HOSTNAME: localhost
     ports:
-      - "8000-8100:8000-8100"
-    volumes:
-      - icecast_logs:/var/log/icecast
+      - "8000:8000"
     networks:
       - centovacast-network
 
@@ -89,7 +75,6 @@ volumes:
   mongodb_data:
   media_files:
   stream_configs:
-  icecast_logs:
 
 networks:
   centovacast-network:

@@ -50,7 +50,7 @@ const Login = () => {
               <Radio className="w-6 h-6 text-white" />
             </div>
           </div>
-          <CardTitle className="text-2xl font-bold">CentovaCast</CardTitle>
+          <CardTitle className="text-2xl font-bold">Clonetova</CardTitle>
           <p className="text-gray-600">Streaming Server Control Panel</p>
         </CardHeader>
         <CardContent>
@@ -104,7 +104,7 @@ const Login = () => {
           
           <div className="mt-6 text-center text-sm text-gray-600">
             <p>Demo Credentials:</p>
-            <p className="font-medium">Email: admin@centovacast.local</p>
+            <p className="font-medium">Email: admin@clonetova.local</p>
             <p className="font-medium">Password: admin123</p>
           </div>
         </CardContent>

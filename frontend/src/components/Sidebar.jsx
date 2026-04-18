@@ -31,7 +31,7 @@ const Sidebar = () => {
             <Headphones className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold">CentovaCast</h1>
+            <h1 className="text-xl font-bold">Clonetova</h1>
             <p className="text-xs text-slate-400">v3.2.12</p>
           </div>
         </div>

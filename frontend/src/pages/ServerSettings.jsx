@@ -91,11 +91,11 @@ const ServerSettings = () => {
             <CardContent className="space-y-4">
               <div>
                 <label className="text-sm font-medium">Server Name</label>
-                <Input value="CentovaCast Server" />
+                <Input value="Clonetova Server" />
               </div>
               <div>
                 <label className="text-sm font-medium">Admin Email</label>
-                <Input value="admin@centovacast.local" />
+                <Input value="admin@clonetova.local" />
               </div>
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">Enable User Registration</label>

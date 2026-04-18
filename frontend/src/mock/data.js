@@ -1,4 +1,4 @@
-// Mock data for CentovaCast clone
+// Mock data for Clonetova clone
 
 export const streamStats = {
   currentListeners: 24,
