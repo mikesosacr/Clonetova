@@ -1,25 +1,32 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Bell, Settings, LogOut, User, RefreshCw, X } from 'lucide-react';
 
 const Header = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, api } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
   const menuRef = useRef(null);
   const notifRef = useRef(null);
 
-  const notifications = [
-    { id: 1, text: 'Stream iniciado correctamente', time: 'Hace 2 min', read: false },
-    { id: 2, text: 'Nueva pista subida al media', time: 'Hace 5 min', read: false },
-    { id: 3, text: 'Usuario DJ Mike inició sesión', time: 'Hace 10 min', read: true },
-  ];
-
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  // Cerrar menus al hacer click afuera
+  const fetchNotifications = async () => {
+    try {
+      const res = await api.get('/dashboard/notifications');
+      setNotifications(res.data);
+    } catch (e) {}
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     const handleClick = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
@@ -29,38 +36,37 @@ const Header = () => {
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const markAllRead = async () => {
+    try {
+      await api.put('/dashboard/notifications/read-all');
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    } catch (e) {}
   };
 
-  const handleProfile = () => {
-    setMenuOpen(false);
-    navigate('/settings');
-  };
+  const handleLogout = () => { logout(); navigate('/login'); };
+  const handleProfile = () => { setMenuOpen(false); navigate('/settings'); };
+  const handleRefresh = () => window.location.reload();
 
-  const handleSettings = () => {
-    setMenuOpen(false);
-    navigate('/settings');
-  };
-
-  const handleRefresh = () => {
-    window.location.reload();
+  const typeColor = (type) => {
+    switch(type) {
+      case 'stream': return 'bg-blue-50 border-l-2 border-blue-400';
+      case 'media': return 'bg-purple-50 border-l-2 border-purple-400';
+      case 'auth': return 'bg-green-50 border-l-2 border-green-400';
+      case 'settings': return 'bg-yellow-50 border-l-2 border-yellow-400';
+      default: return 'bg-gray-50';
+    }
   };
 
   return (
     <header className="bg-white border-b border-gray-200 px-6 py-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-800">
-          Radio Streaming Control Panel
-        </h2>
-
+        <h2 className="text-xl font-semibold text-gray-800">Radio Streaming Control Panel</h2>
         <div className="flex items-center space-x-2">
 
           {/* Notificaciones */}
           <div className="relative" ref={notifRef}>
             <button
-              onClick={() => { setNotifOpen(!notifOpen); setMenuOpen(false); }}
+              onClick={() => { setNotifOpen(!notifOpen); setMenuOpen(false); fetchNotifications(); }}
               className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors"
             >
               <Bell className="w-5 h-5 text-gray-600" />
@@ -70,7 +76,6 @@ const Header = () => {
                 </span>
               )}
             </button>
-
             {notifOpen && (
               <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-lg border border-gray-200 z-50">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
@@ -79,33 +84,33 @@ const Header = () => {
                     <X className="w-4 h-4" />
                   </button>
                 </div>
-                <div className="max-h-64 overflow-y-auto">
-                  {notifications.map(n => (
-                    <div key={n.id} className={`px-4 py-3 border-b border-gray-50 hover:bg-gray-50 ${!n.read ? 'bg-orange-50' : ''}`}>
-                      <p className="text-sm text-gray-800">{n.text}</p>
-                      <p className="text-xs text-gray-400 mt-1">{n.time}</p>
+                <div className="max-h-72 overflow-y-auto">
+                  {notifications.length === 0 ? (
+                    <div className="px-4 py-6 text-center text-gray-400 text-sm">Sin actividad reciente</div>
+                  ) : notifications.map((n, i) => (
+                    <div key={i} className={`px-4 py-3 border-b border-gray-50 ${!n.read ? typeColor(n.type) : 'bg-white'}`}>
+                      <p className="text-sm text-gray-800">{n.message}</p>
+                      <p className="text-xs text-gray-400 mt-1">{n.timestamp}</p>
                     </div>
                   ))}
                 </div>
-                <div className="px-4 py-2 text-center">
-                  <button className="text-sm text-orange-500 hover:text-orange-700 font-medium">
-                    Marcar todas como leídas
-                  </button>
-                </div>
+                {notifications.length > 0 && (
+                  <div className="px-4 py-2 text-center border-t border-gray-100">
+                    <button onClick={markAllRead} className="text-sm text-orange-500 hover:text-orange-700 font-medium">
+                      Marcar todas como leídas
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
 
           {/* Refresh */}
-          <button
-            onClick={handleRefresh}
-            className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-            title="Recargar página"
-          >
+          <button onClick={handleRefresh} className="p-2 rounded-lg hover:bg-gray-100 transition-colors" title="Recargar">
             <RefreshCw className="w-5 h-5 text-gray-600" />
           </button>
 
-          {/* Menú de usuario */}
+          {/* Menú usuario */}
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => { setMenuOpen(!menuOpen); setNotifOpen(false); }}
@@ -116,39 +121,24 @@ const Header = () => {
               </div>
               <span className="font-medium text-gray-700">{user?.name || user?.email || 'Admin'}</span>
             </button>
-
             {menuOpen && (
               <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-200 z-50 py-1">
-                <button
-                  onClick={handleProfile}
-                  className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  <User className="w-4 h-4 mr-3 text-gray-400" />
-                  Perfil
+                <button onClick={handleProfile} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                  <User className="w-4 h-4 mr-3 text-gray-400" />Perfil
                 </button>
-                <button
-                  onClick={handleSettings}
-                  className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  <Settings className="w-4 h-4 mr-3 text-gray-400" />
-                  Configuración
+                <button onClick={() => { setMenuOpen(false); navigate('/settings'); }} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                  <Settings className="w-4 h-4 mr-3 text-gray-400" />Configuración
                 </button>
                 <div className="border-t border-gray-100 my-1" />
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-                >
-                  <LogOut className="w-4 h-4 mr-3" />
-                  Cerrar sesión
+                <button onClick={handleLogout} className="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50">
+                  <LogOut className="w-4 h-4 mr-3" />Cerrar sesión
                 </button>
               </div>
             )}
           </div>
-
         </div>
       </div>
     </header>
   );
 };
-
 export default Header;
