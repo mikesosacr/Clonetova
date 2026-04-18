@@ -477,15 +477,24 @@ async def get_media(current_user: User = Depends(get_current_user)):
     return result
 
 @api_router.get("/media/{track_id}/stream")
-async def stream_media(track_id: str, current_user: User = Depends(get_current_user)):
+async def stream_media(track_id: str, token: Optional[str] = None):
     from fastapi.responses import FileResponse
+    if token:
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            if not payload.get("sub"):
+                raise HTTPException(status_code=401, detail="Invalid token")
+        except JWTError:
+            raise HTTPException(status_code=401, detail="Invalid token")
     track = await db.media.find_one({"id": track_id})
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
     file_path = Path(track["file_path"])
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
-    return FileResponse(str(file_path), media_type="audio/mpeg")
+    suffix = file_path.suffix.lower()
+    types = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".flac": "audio/flac", ".wav": "audio/wav", ".aac": "audio/aac"}
+    return FileResponse(str(file_path), media_type=types.get(suffix, "audio/mpeg"))
 
 @api_router.post("/media/upload")
 async def upload_media(files: List[UploadFile] = File(...), current_user: User = Depends(get_current_user)):
@@ -501,10 +510,11 @@ async def upload_media(files: List[UploadFile] = File(...), current_user: User =
             content = await file.read()
             await f.write(content)
         meta = get_audio_metadata(file_path)
+        original_stem = Path(file.filename).stem
         track = {
             "id": file_id,
             "filename": file.filename,
-            "title": meta["title"] or Path(file.filename).stem,
+            "title": meta["title"] if meta["title"] and meta["title"] != file_id else original_stem,
             "artist": meta["artist"],
             "album": meta["album"],
             "duration": meta["duration"],
