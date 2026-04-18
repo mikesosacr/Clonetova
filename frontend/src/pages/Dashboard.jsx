@@ -1,285 +1,169 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Badge } from '../components/ui/badge';
-import { Button } from '../components/ui/button';
-import { 
-  Radio, 
-  Users, 
-  Music, 
-  Server, 
-  Play, 
-  Pause, 
-  SkipForward, 
-  Volume2,
-  Activity,
-  TrendingUp,
-  Clock,
-  Wifi
-} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Radio, Users, Music, Server, Play, Square, Activity, TrendingUp, Clock, Wifi, Plus, Upload, UserPlus, Shuffle } from 'lucide-react';
 import { toast } from '../hooks/use-toast';
 
 const Dashboard = () => {
   const { api } = useAuth();
-  const [stats, setStats] = useState({
-    totalStreams: 0,
-    activeStreams: 0,
-    totalListeners: 0,
-    totalTracks: 0,
-    serverUptime: '0d 0h 0m'
-  });
+  const navigate = useNavigate();
+  const [stats, setStats] = useState({ totalStreams: 0, activeStreams: 0, totalListeners: 0, totalTracks: 0, serverUptime: '0d 0h 0m' });
   const [activeStreams, setActiveStreams] = useState([]);
   const [recentActivity, setRecentActivity] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchDashboardData();
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchDashboardData, 30000);
+    fetchAll();
+    const interval = setInterval(fetchAll, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  const fetchDashboardData = async () => {
+  const fetchAll = async () => {
     try {
       const [statsRes, streamsRes, activityRes] = await Promise.all([
         api.get('/dashboard/stats'),
         api.get('/streams/active'),
         api.get('/dashboard/recent-activity')
       ]);
-      
       setStats(statsRes.data);
       setActiveStreams(streamsRes.data);
       setRecentActivity(activityRes.data);
-    } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load dashboard data",
-        variant: "destructive"
-      });
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) {
+      console.error('Dashboard fetch error:', e);
+    } finally { setLoading(false); }
   };
 
-  const handleStreamControl = async (streamId, action) => {
+  const handleStreamAction = async (streamId, action) => {
     try {
       await api.post(`/streams/${streamId}/${action}`);
-      toast({
-        title: "Success",
-        description: `Stream ${action} successful`,
-      });
-      fetchDashboardData(); // Refresh data
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: `Failed to ${action} stream`,
-        variant: "destructive"
-      });
+      toast({ title: "✅ Listo", description: `Stream ${action === 'stop' ? 'detenido' : 'iniciado'}` });
+      fetchAll();
+    } catch (e) {
+      toast({ title: "Error", description: `No se pudo ejecutar la acción`, variant: "destructive" });
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-96">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
-      </div>
-    );
-  }
+  const activityTypeColor = (type) => {
+    const colors = { stream: 'bg-blue-500', media: 'bg-purple-500', auth: 'bg-green-500', settings: 'bg-yellow-500', user: 'bg-pink-500' };
+    return colors[type] || 'bg-orange-500';
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div></div>;
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600">Overview of your streaming servers</p>
+          <p className="text-gray-600">Resumen de tu plataforma de streaming</p>
         </div>
-        <Button onClick={fetchDashboardData} className="bg-orange-500 hover:bg-orange-600">
-          <Activity className="w-4 h-4 mr-2" />
-          Refresh
-        </Button>
+        <button onClick={fetchAll} className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium">
+          <Activity className="w-4 h-4" />Actualizar
+        </button>
       </div>
 
-      {/* Stats Overview */}
+      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Streams</p>
-                <p className="text-3xl font-bold text-gray-900">{stats.totalStreams}</p>
-              </div>
-              <Radio className="w-8 h-8 text-blue-500" />
+        {[
+          { label: 'Total Streams', value: stats.totalStreams, sub: `${stats.activeStreams} activos`, icon: Radio, color: 'text-blue-600', subColor: 'text-green-600' },
+          { label: 'Oyentes', value: stats.totalListeners, sub: 'En este momento', icon: Users, color: 'text-green-600', subColor: 'text-gray-500' },
+          { label: 'Pistas de Media', value: stats.totalTracks, sub: 'En biblioteca', icon: Music, color: 'text-purple-600', subColor: 'text-gray-500' },
+          { label: 'Uptime', value: stats.serverUptime, sub: 'En línea', icon: Server, color: 'text-orange-600', subColor: 'text-green-600', isText: true },
+        ].map((s, i) => (
+          <div key={i} className="bg-white border border-gray-200 rounded-xl p-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium text-gray-600">{s.label}</p>
+              <s.icon className={`w-6 h-6 ${s.color} opacity-70`} />
             </div>
-            <div className="mt-2 flex items-center text-sm">
-              <span className="text-green-600">{stats.activeStreams} active</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Listeners</p>
-                <p className="text-3xl font-bold text-gray-900">{stats.totalListeners}</p>
-              </div>
-              <Users className="w-8 h-8 text-green-500" />
-            </div>
-            <div className="mt-2 flex items-center text-sm">
-              <TrendingUp className="w-4 h-4 text-green-600 mr-1" />
-              <span className="text-green-600">+12% from yesterday</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Media Tracks</p>
-                <p className="text-3xl font-bold text-gray-900">{stats.totalTracks}</p>
-              </div>
-              <Music className="w-8 h-8 text-purple-500" />
-            </div>
-            <div className="mt-2 flex items-center text-sm">
-              <span className="text-gray-600">Across all streams</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Server Uptime</p>
-                <p className="text-2xl font-bold text-gray-900">{stats.serverUptime}</p>
-              </div>
-              <Server className="w-8 h-8 text-orange-500" />
-            </div>
-            <div className="mt-2 flex items-center text-sm">
-              <Wifi className="w-4 h-4 text-green-600 mr-1" />
-              <span className="text-green-600">Online</span>
-            </div>
-          </CardContent>
-        </Card>
+            <p className={`${s.isText ? 'text-2xl' : 'text-3xl'} font-bold text-gray-900`}>{s.value}</p>
+            <p className={`text-sm mt-1 flex items-center gap-1 ${s.subColor}`}>
+              {i === 3 && <Wifi className="w-3 h-3" />}{s.sub}
+            </p>
+          </div>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Active Streams */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Radio className="w-5 h-5 mr-2" />
-              Active Streams
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {activeStreams.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">No active streams</p>
-              ) : (
-                activeStreams.map((stream) => (
-                  <div key={stream.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-2">
-                        <h3 className="font-semibold">{stream.name}</h3>
-                        <Badge variant={stream.status === 'online' ? 'default' : 'secondary'}>
-                          {stream.status}
-                        </Badge>
-                      </div>
-                      <div className="text-sm text-gray-600 mt-1">
-                        <span>{stream.listeners} listeners</span>
-                        <span className="mx-2">•</span>
-                        <span>{stream.bitrate} kbps</span>
-                        <span className="mx-2">•</span>
-                        <span>Port {stream.port}</span>
-                      </div>
-                      {stream.currentTrack && (
-                        <div className="text-sm text-blue-600 mt-1">
-                          Now Playing: {stream.currentTrack}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleStreamControl(stream.id, stream.status === 'online' ? 'stop' : 'start')}
-                      >
-                        {stream.status === 'online' ? 
-                          <Pause className="w-4 h-4" /> : 
-                          <Play className="w-4 h-4" />
-                        }
-                      </Button>
-                      <Button size="sm" variant="outline">
-                        <SkipForward className="w-4 h-4" />
-                      </Button>
-                    </div>
+        <div className="bg-white border border-gray-200 rounded-xl">
+          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+              <Radio className="w-5 h-5 text-orange-500" />Streams Activos
+            </h2>
+            <button onClick={() => navigate('/streams')} className="text-sm text-orange-500 hover:text-orange-700">Ver todos →</button>
+          </div>
+          <div className="p-4 space-y-3">
+            {activeStreams.length === 0 ? (
+              <div className="text-center py-8 text-gray-400">
+                <Radio className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                <p className="text-sm">No hay streams activos</p>
+                <button onClick={() => navigate('/streams')} className="mt-3 text-sm text-orange-500 hover:text-orange-700">Gestionar streams →</button>
+              </div>
+            ) : activeStreams.map(s => (
+              <div key={s.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                    <p className="font-medium text-sm truncate">{s.name}</p>
                   </div>
-                ))
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {s.current_listeners}/{s.max_listeners} oyentes • {s.bitrate} kbps • Puerto {s.port}
+                  </p>
+                </div>
+                <button onClick={() => handleStreamAction(s.id, 'stop')}
+                  className="ml-2 flex items-center gap-1 px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs">
+                  <Square className="w-3 h-3" />Detener
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
 
         {/* Recent Activity */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Clock className="w-5 h-5 mr-2" />
-              Recent Activity
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {recentActivity.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">No recent activity</p>
-              ) : (
-                recentActivity.map((activity, index) => (
-                  <div key={index} className="flex items-start space-x-3">
-                    <div className="w-2 h-2 bg-orange-500 rounded-full mt-2"></div>
-                    <div className="flex-1">
-                      <p className="text-sm">{activity.message}</p>
-                      <p className="text-xs text-gray-500">{activity.timestamp}</p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </CardContent>
-        </Card>
+        <div className="bg-white border border-gray-200 rounded-xl">
+          <div className="px-6 py-4 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+              <Clock className="w-5 h-5 text-orange-500" />Actividad Reciente
+            </h2>
+          </div>
+          <div className="p-4 space-y-3">
+            {recentActivity.length === 0 ? (
+              <div className="text-center py-8 text-gray-400">
+                <Clock className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                <p className="text-sm">Sin actividad reciente</p>
+              </div>
+            ) : recentActivity.map((a, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${activityTypeColor(a.type)}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-gray-800">{a.message}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{a.timestamp}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Quick Actions */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Quick Actions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button variant="outline" className="h-20 flex-col">
-              <Radio className="w-6 h-6 mb-2" />
-              <span>Create Stream</span>
-            </Button>
-            <Button variant="outline" className="h-20 flex-col">
-              <Music className="w-6 h-6 mb-2" />
-              <span>Upload Media</span>
-            </Button>
-            <Button variant="outline" className="h-20 flex-col">
-              <Users className="w-6 h-6 mb-2" />
-              <span>Add User</span>
-            </Button>
-            <Button variant="outline" className="h-20 flex-col">
-              <Volume2 className="w-6 h-6 mb-2" />
-              <span>Configure AutoDJ</span>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="bg-white border border-gray-200 rounded-xl p-6">
+        <h2 className="font-semibold text-gray-900 mb-4">Acciones Rápidas</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: 'Crear Stream', icon: Plus, path: '/streams', color: 'text-blue-600 bg-blue-50 hover:bg-blue-100' },
+            { label: 'Subir Media', icon: Upload, path: '/media', color: 'text-purple-600 bg-purple-50 hover:bg-purple-100' },
+            { label: 'Agregar Usuario', icon: UserPlus, path: '/users', color: 'text-green-600 bg-green-50 hover:bg-green-100' },
+            { label: 'Configurar AutoDJ', icon: Shuffle, path: '/autodj', color: 'text-orange-600 bg-orange-50 hover:bg-orange-100' },
+          ].map((a, i) => (
+            <button key={i} onClick={() => navigate(a.path)}
+              className={`flex flex-col items-center justify-center p-4 rounded-xl transition-colors h-24 ${a.color}`}>
+              <a.icon className="w-7 h-7 mb-2" />
+              <span className="text-sm font-medium">{a.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 };
-
 export default Dashboard;

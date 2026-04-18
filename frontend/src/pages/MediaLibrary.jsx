@@ -1,316 +1,304 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Badge } from '../components/ui/badge';
-import { Progress } from '../components/ui/progress';
-import { 
-  Upload, 
-  Music, 
-  Search, 
-  Play, 
-  Trash2, 
-  Download, 
-  Filter,
-  Grid,
-  List,
-  Folder,
-  File
-} from 'lucide-react';
+import { Upload, Music, Search, Play, Pause, Trash2, List, Grid, X } from 'lucide-react';
 import { toast } from '../hooks/use-toast';
+
+const formatDuration = (s) => {
+  if (!s) return '--:--';
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+};
+const formatSize = (b) => {
+  if (!b) return '0 B';
+  const i = Math.floor(Math.log(b) / Math.log(1024));
+  return `${(b / Math.pow(1024, i)).toFixed(1)} ${['B','KB','MB','GB'][i]}`;
+};
 
 const MediaLibrary = () => {
   const { api } = useAuth();
   const fileInputRef = useRef();
+  const audioRef = useRef();
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState('grid');
-  const [selectedTracks, setSelectedTracks] = useState([]);
+  const [viewMode, setViewMode] = useState('list');
+  const [currentTrack, setCurrentTrack] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  useEffect(() => { fetchTracks(); }, []);
 
   useEffect(() => {
-    fetchTracks();
-  }, []);
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onTime = () => setCurrentTime(audio.currentTime);
+    const onDur = () => setDuration(audio.duration);
+    const onEnd = () => { setIsPlaying(false); setCurrentTime(0); };
+    audio.addEventListener('timeupdate', onTime);
+    audio.addEventListener('loadedmetadata', onDur);
+    audio.addEventListener('ended', onEnd);
+    return () => {
+      audio.removeEventListener('timeupdate', onTime);
+      audio.removeEventListener('loadedmetadata', onDur);
+      audio.removeEventListener('ended', onEnd);
+    };
+  }, [currentTrack]);
 
   const fetchTracks = async () => {
     try {
-      const response = await api.get('/media');
-      setTracks(response.data);
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to load media library",
-        variant: "destructive"
-      });
-    } finally {
-      setLoading(false);
-    }
+      const res = await api.get('/media');
+      setTracks(res.data);
+    } catch (e) {
+      toast({ title: "Error", description: "No se pudo cargar la biblioteca", variant: "destructive" });
+    } finally { setLoading(false); }
   };
 
-  const handleFileUpload = async (files) => {
+  const handleUpload = async (files) => {
+    if (!files?.length) return;
     setUploading(true);
+    setUploadProgress(0);
     const formData = new FormData();
-    
-    Array.from(files).forEach(file => {
-      formData.append('files', file);
-    });
-
+    Array.from(files).forEach(f => formData.append('files', f));
     try {
-      const response = await api.post('/media/upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        onUploadProgress: (progressEvent) => {
-          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          setUploadProgress(progress);
-        }
+      await api.post('/media/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (e) => setUploadProgress(Math.round(e.loaded * 100 / e.total))
       });
-      
-      toast({
-        title: "Success",
-        description: `${files.length} file(s) uploaded successfully`,
-      });
-      
+      toast({ title: "✅ Subida exitosa", description: `${files.length} archivo(s) subido(s)` });
       fetchTracks();
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to upload files",
-        variant: "destructive"
-      });
-    } finally {
-      setUploading(false);
-      setUploadProgress(0);
+    } catch (e) {
+      toast({ title: "Error", description: "Error al subir archivos", variant: "destructive" });
+    } finally { setUploading(false); setUploadProgress(0); }
+  };
+
+  const playTrack = async (track) => {
+    const audio = audioRef.current;
+    if (currentTrack?.id === track.id) {
+      if (isPlaying) { audio.pause(); setIsPlaying(false); }
+      else { await audio.play(); setIsPlaying(true); }
+      return;
+    }
+    setCurrentTrack(track);
+    setIsPlaying(false);
+    setCurrentTime(0);
+    // Get token for auth
+    const token = localStorage.getItem('token');
+    audio.src = `http://${window.location.hostname}:8001/api/media/${track.id}/stream`;
+    audio.load();
+    try { await audio.play(); setIsPlaying(true); }
+    catch (e) { toast({ title: "Error", description: "No se pudo reproducir el archivo", variant: "destructive" }); }
+  };
+
+  const stopPlayer = () => {
+    audioRef.current?.pause();
+    setIsPlaying(false);
+    setCurrentTrack(null);
+    setCurrentTime(0);
+  };
+
+  const handleDelete = async (trackId) => {
+    if (!window.confirm('¿Eliminar esta pista?')) return;
+    try {
+      await api.delete(`/media/${trackId}`);
+      if (currentTrack?.id === trackId) stopPlayer();
+      toast({ title: "✅ Eliminado", description: "Pista eliminada correctamente" });
+      fetchTracks();
+    } catch (e) {
+      toast({ title: "Error", description: "No se pudo eliminar", variant: "destructive" });
     }
   };
 
-  const handleDeleteTrack = async (trackId) => {
-    if (window.confirm('Are you sure you want to delete this track?')) {
-      try {
-        await api.delete(`/media/${trackId}`);
-        toast({
-          title: "Success",
-          description: "Track deleted successfully",
-        });
-        fetchTracks();
-      } catch (error) {
-        toast({
-          title: "Error",
-          description: "Failed to delete track",
-          variant: "destructive"
-        });
-      }
-    }
+  const seek = (e) => {
+    const audio = audioRef.current;
+    if (!audio || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pct = (e.clientX - rect.left) / rect.width;
+    audio.currentTime = pct * duration;
   };
 
-  const filteredTracks = tracks.filter(track =>
-    track.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    track.artist?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    track.album?.toLowerCase().includes(searchTerm.toLowerCase())
+  const filtered = tracks.filter(t =>
+    t.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    t.artist?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    t.album?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const formatDuration = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const formatFileSize = (bytes) => {
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    if (bytes === 0) return '0 Bytes';
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-96">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
-      </div>
-    );
-  }
+  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div></div>;
 
   return (
     <div className="space-y-6">
+      <audio ref={audioRef} />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Media Library</h1>
-          <p className="text-gray-600">Manage your music files</p>
+          <h1 className="text-3xl font-bold text-gray-900">Biblioteca de Media</h1>
+          <p className="text-gray-600">{tracks.length} pistas en la biblioteca</p>
         </div>
-        <Button 
-          onClick={() => fileInputRef.current?.click()}
-          className="bg-orange-500 hover:bg-orange-600"
-          disabled={uploading}
-        >
-          <Upload className="w-4 h-4 mr-2" />
-          {uploading ? 'Uploading...' : 'Upload Files'}
-        </Button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept="audio/*"
-          onChange={(e) => handleFileUpload(e.target.files)}
-          className="hidden"
-        />
+        <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+          className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50">
+          <Upload className="w-4 h-4" />{uploading ? `Subiendo ${uploadProgress}%` : 'Subir Archivos'}
+        </button>
+        <input ref={fileInputRef} type="file" multiple accept="audio/*" className="hidden"
+          onChange={e => handleUpload(e.target.files)} />
       </div>
 
-      {/* Upload Progress */}
+      {/* Upload progress */}
       {uploading && (
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-4">
-              <Upload className="w-6 h-6 text-orange-500" />
-              <div className="flex-1">
-                <div className="flex justify-between text-sm mb-1">
-                  <span>Uploading files...</span>
-                  <span>{uploadProgress}%</span>
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <div className="flex items-center justify-between text-sm mb-2">
+            <span className="text-gray-600">Subiendo archivos...</span>
+            <span className="font-medium">{uploadProgress}%</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="bg-orange-500 h-2 rounded-full transition-all" style={{width: `${uploadProgress}%`}} />
+          </div>
+        </div>
+      )}
+
+      {/* Player */}
+      {currentTrack && (
+        <div className="bg-gradient-to-r from-slate-800 to-slate-700 text-white rounded-xl p-4">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-orange-500 rounded-lg flex items-center justify-center flex-shrink-0">
+              <Music className="w-6 h-6" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold truncate">{currentTrack.title}</p>
+              <p className="text-sm text-slate-300 truncate">{currentTrack.artist || 'Artista desconocido'}</p>
+              <div className="flex items-center gap-2 mt-2">
+                <span className="text-xs text-slate-400">{formatDuration(currentTime)}</span>
+                <div className="flex-1 bg-slate-600 rounded-full h-1.5 cursor-pointer" onClick={seek}>
+                  <div className="bg-orange-500 h-1.5 rounded-full" style={{width: duration ? `${(currentTime/duration)*100}%` : '0%'}} />
                 </div>
-                <Progress value={uploadProgress} className="h-2" />
+                <span className="text-xs text-slate-400">{formatDuration(duration || currentTrack.duration)}</span>
               </div>
             </div>
-          </CardContent>
-        </Card>
+            <div className="flex items-center gap-2">
+              <button onClick={() => playTrack(currentTrack)}
+                className="w-10 h-10 bg-orange-500 hover:bg-orange-600 rounded-full flex items-center justify-center">
+                {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
+              </button>
+              <button onClick={stopPlayer} className="w-8 h-8 bg-slate-600 hover:bg-slate-500 rounded-full flex items-center justify-center">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Controls */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between space-x-4">
-            <div className="flex items-center space-x-4 flex-1">
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                <Input
-                  placeholder="Search tracks, artists, albums..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              <Button variant="outline" size="sm">
-                <Filter className="w-4 h-4 mr-2" />
-                Filter
-              </Button>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant={viewMode === 'grid' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setViewMode('grid')}
-              >
-                <Grid className="w-4 h-4" />
-              </Button>
-              <Button
-                variant={viewMode === 'list' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setViewMode('list')}
-              >
-                <List className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex items-center justify-between bg-white border border-gray-200 rounded-xl p-4">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+          <input className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            placeholder="Buscar pistas, artistas, álbumes..."
+            value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setViewMode('list')}
+            className={`p-2 rounded-lg ${viewMode === 'list' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}>
+            <List className="w-4 h-4" />
+          </button>
+          <button onClick={() => setViewMode('grid')}
+            className={`p-2 rounded-lg ${viewMode === 'grid' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}>
+            <Grid className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
 
-      {/* Media Grid/List */}
-      {filteredTracks.length === 0 ? (
-        <Card>
-          <CardContent className="p-12 text-center">
-            <Music className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No media files found</h3>
-            <p className="text-gray-600 mb-4">Upload your first audio files to get started</p>
-            <Button 
-              onClick={() => fileInputRef.current?.click()}
-              className="bg-orange-500 hover:bg-orange-600"
-            >
-              <Upload className="w-4 h-4 mr-2" />
-              Upload Files
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className={viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4' : 'space-y-2'}>
-          {filteredTracks.map((track) => (
-            <Card key={track.id} className={`${viewMode === 'list' ? 'hover:bg-gray-50' : ''} transition-colors`}>
-              <CardContent className={viewMode === 'grid' ? 'p-4' : 'p-3'}>
-                {viewMode === 'grid' ? (
-                  <div className="text-center">
-                    <div className="w-16 h-16 bg-gradient-to-br from-orange-400 to-orange-600 rounded-lg mx-auto mb-3 flex items-center justify-center">
-                      <Music className="w-8 h-8 text-white" />
-                    </div>
-                    <h3 className="font-semibold text-sm mb-1 truncate" title={track.title}>
+      {/* Tracks */}
+      {filtered.length === 0 ? (
+        <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
+          <Music className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">
+            {searchTerm ? 'Sin resultados' : 'Biblioteca vacía'}
+          </h3>
+          <p className="text-gray-500 mb-4">
+            {searchTerm ? 'Intenta con otros términos de búsqueda' : 'Sube tus primeros archivos de audio'}
+          </p>
+          {!searchTerm && (
+            <button onClick={() => fileInputRef.current?.click()}
+              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium">
+              <Upload className="w-4 h-4 inline mr-2" />Subir Archivos
+            </button>
+          )}
+        </div>
+      ) : viewMode === 'list' ? (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="text-left text-xs font-medium text-gray-500 uppercase px-4 py-3 w-12">#</th>
+                <th className="text-left text-xs font-medium text-gray-500 uppercase px-4 py-3">Título</th>
+                <th className="text-left text-xs font-medium text-gray-500 uppercase px-4 py-3 hidden md:table-cell">Artista</th>
+                <th className="text-left text-xs font-medium text-gray-500 uppercase px-4 py-3 hidden lg:table-cell">Álbum</th>
+                <th className="text-left text-xs font-medium text-gray-500 uppercase px-4 py-3 hidden md:table-cell">Duración</th>
+                <th className="text-left text-xs font-medium text-gray-500 uppercase px-4 py-3 hidden lg:table-cell">Tamaño</th>
+                <th className="text-right text-xs font-medium text-gray-500 uppercase px-4 py-3">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filtered.map((track, i) => (
+                <tr key={track.id} className={`hover:bg-gray-50 transition-colors ${currentTrack?.id === track.id ? 'bg-orange-50' : ''}`}>
+                  <td className="px-4 py-3">
+                    <button onClick={() => playTrack(track)}
+                      className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-orange-100 text-gray-400 hover:text-orange-500">
+                      {currentTrack?.id === track.id && isPlaying
+                        ? <Pause className="w-4 h-4 text-orange-500" />
+                        : <Play className="w-4 h-4 ml-0.5" />
+                      }
+                    </button>
+                  </td>
+                  <td className="px-4 py-3">
+                    <p className={`font-medium text-sm truncate max-w-xs ${currentTrack?.id === track.id ? 'text-orange-600' : 'text-gray-900'}`}>
                       {track.title || track.filename}
-                    </h3>
-                    <p className="text-xs text-gray-600 mb-1 truncate" title={track.artist}>
-                      {track.artist || 'Unknown Artist'}
                     </p>
-                    <p className="text-xs text-gray-500 mb-3 truncate" title={track.album}>
-                      {track.album || 'Unknown Album'}
-                    </p>
-                    <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
-                      <span>{formatDuration(track.duration || 0)}</span>
-                      <span>{formatFileSize(track.fileSize || 0)}</span>
-                    </div>
-                    <div className="flex items-center justify-center space-x-2">
-                      <Button size="sm" variant="outline">
-                        <Play className="w-3 h-3" />
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={() => handleDeleteTrack(track.id)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center space-x-4">
-                    <div className="w-10 h-10 bg-gradient-to-br from-orange-400 to-orange-600 rounded flex items-center justify-center">
-                      <Music className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-medium truncate">{track.title || track.filename}</h3>
-                      <p className="text-sm text-gray-600 truncate">
-                        {track.artist || 'Unknown Artist'} • {track.album || 'Unknown Album'}
-                      </p>
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      {formatDuration(track.duration || 0)}
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      {formatFileSize(track.fileSize || 0)}
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Button size="sm" variant="outline">
-                        <Play className="w-4 h-4" />
-                      </Button>
-                      <Button size="sm" variant="outline">
-                        <Download className="w-4 h-4" />
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={() => handleDeleteTrack(track.id)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                  </td>
+                  <td className="px-4 py-3 hidden md:table-cell text-sm text-gray-500 truncate max-w-xs">{track.artist || '—'}</td>
+                  <td className="px-4 py-3 hidden lg:table-cell text-sm text-gray-500 truncate max-w-xs">{track.album || '—'}</td>
+                  <td className="px-4 py-3 hidden md:table-cell text-sm text-gray-500">{formatDuration(track.duration)}</td>
+                  <td className="px-4 py-3 hidden lg:table-cell text-sm text-gray-500">{formatSize(track.file_size)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button onClick={() => handleDelete(track.id)}
+                      className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          {filtered.map(track => (
+            <div key={track.id} className={`bg-white border rounded-xl p-4 hover:shadow-md transition-shadow ${currentTrack?.id === track.id ? 'border-orange-400 bg-orange-50' : 'border-gray-200'}`}>
+              <div className="w-full aspect-square bg-gradient-to-br from-orange-400 to-orange-600 rounded-lg mb-3 flex items-center justify-center">
+                <Music className="w-10 h-10 text-white" />
+              </div>
+              <p className="font-medium text-sm truncate">{track.title || track.filename}</p>
+              <p className="text-xs text-gray-500 truncate mb-3">{track.artist || 'Artista desconocido'}</p>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-400">{formatDuration(track.duration)}</span>
+                <div className="flex gap-1">
+                  <button onClick={() => playTrack(track)}
+                    className="p-1.5 bg-orange-100 hover:bg-orange-200 text-orange-600 rounded-lg">
+                    {currentTrack?.id === track.id && isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                  </button>
+                  <button onClick={() => handleDelete(track.id)}
+                    className="p-1.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg">
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            </div>
           ))}
         </div>
       )}
     </div>
   );
 };
-
 export default MediaLibrary;

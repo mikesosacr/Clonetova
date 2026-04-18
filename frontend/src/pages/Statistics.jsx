@@ -1,134 +1,112 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Button } from '../components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { 
-  BarChart3, 
-  Users, 
-  TrendingUp, 
-  Download, 
-  RefreshCw,
-  Calendar,
-  Globe,
-  Music
-} from 'lucide-react';
+import { BarChart3, Users, TrendingUp, RefreshCw, Radio, Music } from 'lucide-react';
+import { toast } from '../hooks/use-toast';
 
 const Statistics = () => {
   const { api } = useAuth();
   const [stats, setStats] = useState(null);
+  const [streams, setStreams] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState('24h');
 
-  useEffect(() => {
-    fetchStatistics();
-  }, [timeRange]);
+  useEffect(() => { fetchAll(); }, []);
 
-  const fetchStatistics = async () => {
+  const fetchAll = async () => {
     setLoading(true);
     try {
-      const response = await api.get(`/statistics?range=${timeRange}`);
-      setStats(response.data);
-    } catch (error) {
-      console.error('Failed to fetch statistics:', error);
-    } finally {
-      setLoading(false);
-    }
+      const [statsRes, streamsRes] = await Promise.all([
+        api.get('/statistics'),
+        api.get('/streams')
+      ]);
+      setStats(statsRes.data);
+      setStreams(streamsRes.data);
+    } catch (e) {
+      toast({ title: "Error", description: "No se pudieron cargar las estadísticas", variant: "destructive" });
+    } finally { setLoading(false); }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-96">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
-      </div>
-    );
-  }
+  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div></div>;
+
+  const cards = [
+    { label: 'Streams Totales', value: stats?.totalStreams || 0, icon: Radio, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: 'Streams Activos', value: stats?.activeStreams || 0, icon: TrendingUp, color: 'text-green-600', bg: 'bg-green-50' },
+    { label: 'Oyentes Activos', value: stats?.totalListeners || 0, icon: Users, color: 'text-purple-600', bg: 'bg-purple-50' },
+    { label: 'Pistas en Biblioteca', value: stats?.totalTracks || 0, icon: Music, color: 'text-orange-600', bg: 'bg-orange-50' },
+    { label: 'Usuarios Registrados', value: stats?.totalUsers || 0, icon: Users, color: 'text-pink-600', bg: 'bg-pink-50' },
+  ];
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Statistics</h1>
-          <p className="text-gray-600">Monitor your streaming performance</p>
+          <h1 className="text-3xl font-bold text-gray-900">Estadísticas</h1>
+          <p className="text-gray-600">Monitorea el rendimiento de tu plataforma</p>
         </div>
-        <div className="flex items-center space-x-4">
-          <Select value={timeRange} onValueChange={setTimeRange}>
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="1h">Last Hour</SelectItem>
-              <SelectItem value="24h">Last 24h</SelectItem>
-              <SelectItem value="7d">Last 7 days</SelectItem>
-              <SelectItem value="30d">Last 30 days</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button onClick={fetchStatistics}>
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
-          </Button>
-        </div>
+        <button onClick={fetchAll}
+          className="flex items-center gap-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg font-medium">
+          <RefreshCw className="w-4 h-4" />Actualizar
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Peak Listeners</p>
-                <p className="text-3xl font-bold text-gray-900">{stats?.peakListeners || 0}</p>
+      {/* Stat cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        {cards.map((c, i) => (
+          <div key={i} className="bg-white border border-gray-200 rounded-xl p-6">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-medium text-gray-600">{c.label}</p>
+              <div className={`p-2 rounded-lg ${c.bg}`}>
+                <c.icon className={`w-5 h-5 ${c.color}`} />
               </div>
-              <TrendingUp className="w-8 h-8 text-green-500" />
             </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Avg Listeners</p>
-                <p className="text-3xl font-bold text-gray-900">{stats?.avgListeners || 0}</p>
-              </div>
-              <Users className="w-8 h-8 text-blue-500" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Sessions</p>
-                <p className="text-3xl font-bold text-gray-900">{stats?.totalSessions || 0}</p>
-              </div>
-              <Calendar className="w-8 h-8 text-purple-500" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Countries</p>
-                <p className="text-3xl font-bold text-gray-900">{stats?.uniqueCountries || 0}</p>
-              </div>
-              <Globe className="w-8 h-8 text-orange-500" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Listener Analytics</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg">
-            <p className="text-gray-500">Chart visualization would be implemented here</p>
+            <p className={`text-3xl font-bold ${c.color}`}>{c.value}</p>
           </div>
-        </CardContent>
-      </Card>
+        ))}
+      </div>
+
+      {/* Streams table */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-orange-500" />Estado de Streams
+          </h2>
+        </div>
+        {streams.length === 0 ? (
+          <div className="p-12 text-center text-gray-400">
+            <Radio className="w-12 h-12 mx-auto mb-4 opacity-50" />
+            <p>No hay streams configurados</p>
+          </div>
+        ) : (
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                {['Stream', 'Estado', 'Puerto', 'Oyentes', 'Bitrate', 'Formato'].map(h => (
+                  <th key={h} className="text-left text-xs font-medium text-gray-500 uppercase px-6 py-3">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {streams.map(s => (
+                <tr key={s.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4">
+                    <p className="font-medium text-gray-900">{s.name}</p>
+                    <p className="text-xs text-gray-500">{s.mount_point}</p>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${s.status === 'online' ? 'bg-green-100 text-green-700' : s.status === 'error' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {s.status === 'online' ? 'En línea' : s.status === 'error' ? 'Error' : 'Offline'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{s.port}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{s.current_listeners}/{s.max_listeners}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{s.bitrate} kbps</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{s.format}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 };
-
 export default Statistics;
