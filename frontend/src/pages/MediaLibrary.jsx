@@ -84,9 +84,8 @@ const MediaLibrary = () => {
     setCurrentTrack(track);
     setIsPlaying(false);
     setCurrentTime(0);
-    // Get token for auth
     const token = localStorage.getItem('token');
-    audio.src = `http://${window.location.hostname}:8001/api/media/${track.id}/stream`;
+    audio.src = `/api/media/${track.id}/stream${token ? `?token=${token}` : ''}`;
     audio.load();
     try { await audio.play(); setIsPlaying(true); }
     catch (e) { toast({ title: "Error", description: "No se pudo reproducir el archivo", variant: "destructive" }); }
