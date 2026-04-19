@@ -12,10 +12,10 @@
     <burst-size>65536</burst-size>
   </limits>
   <authentication>
-    <source-password>icecast123</source-password>
-    <relay-password>icecast123</relay-password>
+    <source-password>fuente123</source-password>
+    <relay-password>relay123</relay-password>
     <admin-user>admin</admin-user>
-    <admin-password>icecast123</admin-password>
+    <admin-password>mikesosa110690047</admin-password>
   </authentication>
   <hostname>141.148.179.210</hostname>
   <listen-socket>

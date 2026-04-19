@@ -20,6 +20,9 @@ services:
       - DB_NAME=centovacast
       - SECRET_KEY=clonetova-super-secret-key-2026
       - PUBLIC_IP=141.148.179.210
+      - ICECAST_HOST=centovacast-icecast
+      - ICECAST_PORT=8000
+      - ICECAST_PASSWORD=mikesosa110690047
 
   frontend:
     build:
@@ -37,6 +40,18 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+
+  nginx:
+    image: nginx:alpine
+    container_name: centovacast-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - frontend
+      - backend
 
 volumes:
   mongodb_data:
