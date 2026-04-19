@@ -3,79 +3,40 @@ services:
     image: mongo:5.0
     container_name: centovacast-mongodb
     restart: unless-stopped
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: admin123
-      MONGO_INITDB_DATABASE: centovacast
     volumes:
       - mongodb_data:/data/db
-      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
-    ports:
-      - "27017:27017"
-    networks:
-      - centovacast-network
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    build: ./backend
     container_name: centovacast-backend
     restart: unless-stopped
-    environment:
-      MONGO_URL: mongodb://centovacast:centovacast123@mongodb:27017/centovacast
-      DB_NAME: centovacast
-      SECRET_KEY: $(openssl rand -hex 32)
-    volumes:
-      - media_files:/app/media
-      - stream_configs:/app/streams
     ports:
       - "8001:8001"
     depends_on:
       - mongodb
-    networks:
-      - centovacast-network
+      - icecast
+    environment:
+      - MONGO_URL=mongodb://centovacast-mongodb:27017
+      - DB_NAME=centovacast
+      - SECRET_KEY=clonetova-super-secret-key-2026
+      - PUBLIC_IP=141.148.179.210
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
     container_name: centovacast-frontend
     restart: unless-stopped
     ports:
       - "3000:3000"
-    depends_on:
-      - backend
-    networks:
-      - centovacast-network
-
-  nginx:
-    image: nginx:alpine
-    container_name: centovacast-nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - frontend
-      - backend
-    networks:
-      - centovacast-network
+    environment:
+      - REACT_APP_BACKEND_URL=http://141.148.179.210:8001
 
   icecast:
-    image: deepcomp/icecast2
+    build: ./icecast
     container_name: centovacast-icecast
     restart: unless-stopped
     ports:
       - "8000:8000"
-    networks:
-      - centovacast-network
 
 volumes:
   mongodb_data:
-  media_files:
-  stream_configs:
-
-networks:
-  centovacast-network:
-    driver: bridge
