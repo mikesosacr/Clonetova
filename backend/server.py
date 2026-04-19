@@ -21,6 +21,13 @@ from mutagen.flac import FLAC
 from mutagen.oggvorbis import OggVorbis
 from mutagen.aac import AAC
 
+# ── NUEVO: IceCast integration ─────────────────────────────────
+from icecast_integration import (
+    init_icecast_client,
+    get_icecast_client,
+    poll_icecast_forever,
+)
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 from dotenv import load_dotenv
@@ -301,17 +308,24 @@ async def register(user_data: UserCreate):
 # ── Dashboard ─────────────────────────────────────────────────
 @api_router.get("/dashboard/stats")
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
+    # NUEVO: obtener listeners reales de IceCast
+    ic = get_icecast_client()
+    server_stats = await ic.get_server_stats() if ic else {}
+
     total_streams = await db.streams.count_documents({})
     active_streams = await db.streams.count_documents({"status": "online"})
-    cursor = db.streams.aggregate([
-        {"$match": {"status": "online"}},
-        {"$group": {"_id": None, "total": {"$sum": "$current_listeners"}}}
-    ])
-    result = await cursor.to_list(1)
-    total_listeners = result[0]["total"] if result else 0
     total_tracks = await db.media.count_documents({})
 
-    # Uptime real del proceso
+    # Preferir listeners de IceCast, fallback a MongoDB
+    total_listeners = server_stats.get("listeners", 0)
+    if total_listeners == 0:
+        cursor = db.streams.aggregate([
+            {"$match": {"status": "online"}},
+            {"$group": {"_id": None, "total": {"$sum": "$current_listeners"}}}
+        ])
+        result = await cursor.to_list(1)
+        total_listeners = result[0]["total"] if result else 0
+
     try:
         proc = psutil.Process(1)
         uptime_seconds = (datetime.utcnow() - datetime.utcfromtimestamp(proc.create_time())).total_seconds()
@@ -327,7 +341,9 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         "activeStreams": active_streams,
         "totalListeners": total_listeners,
         "totalTracks": total_tracks,
-        "serverUptime": uptime_str
+        "serverUptime": uptime_str,
+        "icecastOnline": server_stats.get("online", False),  # NUEVO
+        "icecastSources": server_stats.get("sources", 0),   # NUEVO
     }
 
 @api_router.get("/dashboard/recent-activity")
@@ -416,40 +432,59 @@ async def start_stream_endpoint(stream_id: str, current_user: User = Depends(get
     stream_data = await db.streams.find_one({"id": stream_id})
     if not stream_data:
         raise HTTPException(status_code=404, detail="Stream not found")
-    # Conectar con icecast via HTTP API
-    import httpx
-    settings = await db.settings.find_one({"id": "global"}) or {}
-    icecast_host = settings.get("icecastHost", "centovacast-icecast")
-    icecast_port = settings.get("icecastPort", 8000)
-    icecast_pass = settings.get("icecastPassword", "icecast123")
-    try:
-        async with httpx.AsyncClient() as client_http:
-            r = await client_http.get(
-                f"http://{icecast_host}:{icecast_port}/admin/listclients",
-                auth=("admin", icecast_pass), timeout=5
-            )
-        icecast_ok = r.status_code < 500
-    except:
-        icecast_ok = False
+
+    # NUEVO: verificar estado real en IceCast
+    ic = get_icecast_client()
+    icecast_alive = await ic.is_alive() if ic else False
+
+    mount = stream_data.get("mount_point", "/stream")
+    mount_stats = await ic.get_mount_stats(mount) if ic else None
+    already_live = bool(mount_stats and mount_stats.get("active", False))
 
     await db.streams.update_one(
         {"id": stream_id},
         {"$set": {"status": "online", "uptime": datetime.utcnow(), "updated_at": datetime.utcnow()}}
     )
     await log_activity(f"Stream '{stream_data['name']}' iniciado", "stream")
-    return {"status": "success", "message": "Stream marcado como online", "icecast_connected": icecast_ok}
+
+    return {
+        "status": "success",
+        "message": "Stream marcado como online",
+        "icecast_connected": icecast_alive,
+        "mount_active": already_live,
+        # Si mount_active es False, IceCast está up pero nadie está conectando audio a ese mountpoint.
+        # El source client (Liquidsoap / Butt / IDJC) debe conectarse al puerto configurado.
+        "note": "Para transmitir audio, conecta tu source client (Liquidsoap/Butt) al mountpoint." if not already_live else "Mountpoint activo en IceCast.",
+    }
 
 @api_router.post("/streams/{stream_id}/stop")
 async def stop_stream_endpoint(stream_id: str, current_user: User = Depends(get_current_user)):
     stream_data = await db.streams.find_one({"id": stream_id})
     if not stream_data:
         raise HTTPException(status_code=404, detail="Stream not found")
+
+    # NUEVO: desconectar todos los clientes del mountpoint en IceCast
+    ic = get_icecast_client()
+    kicked_count = 0
+    if ic:
+        mount = stream_data.get("mount_point", "/stream")
+        listeners = await ic.get_mount_listeners(mount)
+        for listener in listeners:
+            client_id = listener.get("id")
+            if client_id:
+                await ic.kick_client(mount, str(client_id))
+                kicked_count += 1
+
     await db.streams.update_one(
         {"id": stream_id},
         {"$set": {"status": "offline", "current_listeners": 0, "uptime": None, "updated_at": datetime.utcnow()}}
     )
     await log_activity(f"Stream '{stream_data['name']}' detenido", "stream")
-    return {"status": "success", "message": "Stream detenido"}
+    return {
+        "status": "success",
+        "message": "Stream detenido",
+        "listeners_kicked": kicked_count,
+    }
 
 @api_router.post("/streams/{stream_id}/restart")
 async def restart_stream(stream_id: str, current_user: User = Depends(get_current_user)):
@@ -465,6 +500,199 @@ async def delete_stream(stream_id: str, current_user: User = Depends(get_current
     await db.streams.delete_one({"id": stream_id})
     await log_activity(f"Stream '{stream_data['name']}' eliminado", "stream")
     return {"message": "Stream eliminado"}
+
+# ── NUEVOS: Stream stats desde IceCast ────────────────────────
+
+@api_router.get("/streams/{stream_id}/stats")
+async def get_stream_stats(stream_id: str, current_user: User = Depends(get_current_user)):
+    """
+    Estadísticas en tiempo real del stream consultando IceCast directamente.
+    Devuelve listeners actuales, peak, canción actual, bitrate, etc.
+    """
+    stream_data = await db.streams.find_one({"id": stream_id})
+    if not stream_data:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+    ic = get_icecast_client()
+    mount = stream_data.get("mount_point", "/stream")
+
+    if ic:
+        mount_stats = await ic.get_mount_stats(mount)
+    else:
+        mount_stats = None
+
+    # Merge de datos IceCast + MongoDB
+    listeners = 0
+    peak_listeners = 0
+    current_track = stream_data.get("current_track", "")
+    artist = ""
+    bitrate = stream_data.get("bitrate", 128)
+    active_in_icecast = False
+
+    if mount_stats and mount_stats.get("active"):
+        active_in_icecast = True
+        listeners = mount_stats.get("listeners", 0)
+        peak_listeners = mount_stats.get("peak_listeners", 0)
+        current_track = mount_stats.get("current_song", current_track)
+        artist = mount_stats.get("artist", "")
+        bitrate = mount_stats.get("bitrate", bitrate) or bitrate
+
+    return {
+        "stream_id": stream_id,
+        "name": stream_data.get("name"),
+        "mount_point": mount,
+        "status": stream_data.get("status"),
+        "active_in_icecast": active_in_icecast,
+        "current_listeners": listeners,
+        "peak_listeners": peak_listeners,
+        "max_listeners": stream_data.get("max_listeners", 50),
+        "current_track": current_track,
+        "artist": artist,
+        "bitrate": bitrate,
+        "format": stream_data.get("format", "MP3"),
+        "uptime": stream_data.get("uptime"),
+        "stream_url": f"http://{{host}}:{stream_data.get('port', 8000)}{mount}",
+    }
+
+@api_router.get("/streams/{stream_id}/listeners")
+async def get_stream_listeners(stream_id: str, current_user: User = Depends(get_current_user)):
+    """
+    Lista de oyentes conectados actualmente al stream (desde IceCast).
+    """
+    stream_data = await db.streams.find_one({"id": stream_id})
+    if not stream_data:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+    ic = get_icecast_client()
+    if not ic:
+        return {"listeners": [], "count": 0, "note": "IceCast no disponible"}
+
+    mount = stream_data.get("mount_point", "/stream")
+    listeners = await ic.get_mount_listeners(mount)
+
+    return {
+        "stream_id": stream_id,
+        "mount_point": mount,
+        "count": len(listeners),
+        "listeners": listeners,
+    }
+
+@api_router.delete("/streams/{stream_id}/listeners/{client_id}")
+async def kick_listener(stream_id: str, client_id: str, current_user: User = Depends(require_admin)):
+    """
+    Desconecta un oyente específico del stream.
+    Requiere rol admin.
+    """
+    stream_data = await db.streams.find_one({"id": stream_id})
+    if not stream_data:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+    ic = get_icecast_client()
+    if not ic:
+        raise HTTPException(status_code=503, detail="IceCast no disponible")
+
+    mount = stream_data.get("mount_point", "/stream")
+    success = await ic.kick_client(mount, client_id)
+
+    if not success:
+        raise HTTPException(status_code=500, detail="No se pudo desconectar al oyente")
+
+    await log_activity(f"Oyente {client_id} desconectado del stream '{stream_data['name']}'", "stream")
+    return {"message": f"Oyente {client_id} desconectado"}
+
+@api_router.get("/streams/{stream_id}/current-track")
+async def get_current_track(stream_id: str, current_user: User = Depends(get_current_user)):
+    """
+    Canción que está sonando actualmente en el stream según IceCast.
+    """
+    stream_data = await db.streams.find_one({"id": stream_id})
+    if not stream_data:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+    ic = get_icecast_client()
+    mount = stream_data.get("mount_point", "/stream")
+
+    if ic:
+        track = await ic.get_current_track(mount)
+    else:
+        track = None
+
+    return {
+        "stream_id": stream_id,
+        "mount_point": mount,
+        "current_track": track.get("title", "") if track else stream_data.get("current_track", ""),
+        "artist": track.get("artist", "") if track else "",
+        "active": track.get("active", False) if track else False,
+        "source": "icecast" if track else "mongodb",
+    }
+
+@api_router.put("/streams/{stream_id}/metadata")
+async def update_stream_metadata(
+    stream_id: str,
+    body: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Actualiza el título de la canción que IceCast muestra a los oyentes.
+    Body: { "song": "Artista - Título" }
+    Útil cuando el AutoDJ cambia de track.
+    """
+    stream_data = await db.streams.find_one({"id": stream_id})
+    if not stream_data:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+    song = body.get("song", "")
+    if not song:
+        raise HTTPException(status_code=400, detail="El campo 'song' es requerido")
+
+    ic = get_icecast_client()
+    if not ic:
+        raise HTTPException(status_code=503, detail="IceCast no disponible")
+
+    mount = stream_data.get("mount_point", "/stream")
+    success = await ic.update_metadata(mount, song)
+
+    # También actualizar en MongoDB
+    await db.streams.update_one(
+        {"id": stream_id},
+        {"$set": {"current_track": song, "updated_at": datetime.utcnow()}}
+    )
+
+    return {
+        "message": "Metadata actualizada",
+        "song": song,
+        "icecast_updated": success,
+    }
+
+# ── IceCast status endpoint ───────────────────────────────────
+
+@api_router.get("/icecast/status")
+async def get_icecast_status(current_user: User = Depends(get_current_user)):
+    """
+    Estado global del servidor IceCast: versión, listeners totales,
+    fuentes activas, bandwidth, etc.
+    """
+    ic = get_icecast_client()
+    if not ic:
+        return {"online": False, "error": "IceCast client no inicializado"}
+
+    stats = await ic.get_server_stats()
+    mounts = await ic.list_mounts()
+
+    return {
+        **stats,
+        "mounts": mounts,
+    }
+
+@api_router.get("/icecast/mounts")
+async def list_icecast_mounts(current_user: User = Depends(get_current_user)):
+    """
+    Lista todos los mountpoints activos en IceCast con sus stats.
+    """
+    ic = get_icecast_client()
+    if not ic:
+        return []
+    return await ic.list_mounts()
 
 # ── Media ─────────────────────────────────────────────────────
 @api_router.get("/media", response_model=List[MediaTrack])
@@ -603,15 +831,23 @@ async def delete_playlist(playlist_id: str, current_user: User = Depends(get_cur
 # ── Statistics ────────────────────────────────────────────────
 @api_router.get("/statistics")
 async def get_statistics(current_user: User = Depends(get_current_user)):
+    # NUEVO: listeners reales de IceCast
+    ic = get_icecast_client()
+    server_stats = await ic.get_server_stats() if ic else {}
+
     total_streams = await db.streams.count_documents({})
     active_streams = await db.streams.count_documents({"status": "online"})
     total_tracks = await db.media.count_documents({})
     total_users = await db.users.count_documents({})
-    cursor = db.streams.aggregate([
-        {"$group": {"_id": None, "total": {"$sum": "$current_listeners"}}}
-    ])
-    result = await cursor.to_list(1)
-    total_listeners = result[0]["total"] if result else 0
+
+    total_listeners = server_stats.get("listeners", 0)
+    if total_listeners == 0:
+        cursor = db.streams.aggregate([
+            {"$group": {"_id": None, "total": {"$sum": "$current_listeners"}}}
+        ])
+        result = await cursor.to_list(1)
+        total_listeners = result[0]["total"] if result else 0
+
     return {
         "totalStreams": total_streams,
         "activeStreams": active_streams,
@@ -620,6 +856,8 @@ async def get_statistics(current_user: User = Depends(get_current_user)):
         "totalUsers": total_users,
         "peakListeners": total_listeners,
         "avgListeners": total_listeners,
+        "icecastOnline": server_stats.get("online", False),
+        "icecastSources": server_stats.get("sources", 0),
     }
 
 # ── Users ─────────────────────────────────────────────────────
@@ -677,6 +915,13 @@ async def update_settings(settings: dict, current_user: User = Depends(require_a
     settings.pop("_id", None)
     settings["id"] = "global"
     await db.settings.update_one({"id": "global"}, {"$set": settings}, upsert=True)
+
+    # NUEVO: reinicializar cliente IceCast con la nueva config
+    ic_host = settings.get("icecastHost", "centovacast-icecast")
+    ic_port = settings.get("icecastPort", 8000)
+    ic_pass = settings.get("icecastPassword", "icecast123")
+    init_icecast_client(ic_host, ic_port, ic_pass)
+
     await log_activity("Configuración del servidor actualizada", "settings")
     return {"message": "Configuración guardada"}
 
@@ -690,7 +935,27 @@ async def startup_event():
         logging.info("Connected to MongoDB successfully")
     except Exception as e:
         logging.error(f"MongoDB connection failed: {e}")
+
     await init_default_data()
+
+    # NUEVO: inicializar IceCast client con settings de DB
+    settings = await db.settings.find_one({"id": "global"}) or {}
+    ic = init_icecast_client(
+        host=settings.get("icecastHost", "centovacast-icecast"),
+        port=int(settings.get("icecastPort", 8000)),
+        password=settings.get("icecastPassword", "icecast123"),
+    )
+
+    # Verificar conexión con IceCast al arrancar
+    alive = await ic.is_alive()
+    if alive:
+        logging.info("IceCast conectado correctamente")
+    else:
+        logging.warning("IceCast no disponible al arrancar — se reintentará automáticamente")
+
+    # NUEVO: iniciar polling de listeners en background (cada 15s)
+    asyncio.create_task(poll_icecast_forever(db, interval=15))
+
     logging.info("Clonetova server started")
 
 @app.on_event("shutdown")
