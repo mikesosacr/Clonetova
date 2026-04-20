@@ -1,66 +1,61 @@
+version: '3.8'
+
 services:
+
+  # ── MongoDB ─────────────────────────────────────────────────────────────────
   mongodb:
     image: mongo:5.0
     container_name: centovacast-mongodb
     restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+      MONGO_INITDB_DATABASE: centovacast
     volumes:
       - mongodb_data:/data/db
+    networks:
+      - clonetova_default
 
+  # ── Backend FastAPI ──────────────────────────────────────────────────────────
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: centovacast-backend
     restart: unless-stopped
+    environment:
+      MONGO_URL: mongodb://centovacast:centovacast123@centovacast-mongodb:27017/centovacast
+      DB_NAME: centovacast
+      SECRET_KEY: clonetova-super-secret-key-2026
+    volumes:
+      - media_data:/app/media
+      # ⚠️  CRÍTICO: montar el socket Docker para que el backend
+      #     pueda crear/destruir contenedores Liquidsoap
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8001:8001"
     depends_on:
       - mongodb
-      - icecast
-    environment:
-      - MONGO_URL=mongodb://centovacast-mongodb:27017
-      - DB_NAME=centovacast
-      - SECRET_KEY=clonetova-super-secret-key-2026
-      - PUBLIC_IP=141.148.179.210
-      - ICECAST_HOST=centovacast-icecast
-      - ICECAST_PORT=8000
-      - ICECAST_PASSWORD=mikesosa110690047
-    volumes:
-      - media_data:/app/media
+    networks:
+      - clonetova_default
 
+  # ── Frontend React ───────────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
+      dockerfile: Dockerfile
     container_name: centovacast-frontend
     restart: unless-stopped
+    environment:
+      REACT_APP_BACKEND_URL: http://141.148.179.210
     ports:
       - "3000:3000"
-    environment:
-      - REACT_APP_BACKEND_URL=http://141.148.179.210:8001
-
-  icecast:
-    build: ./icecast
-    container_name: centovacast-icecast
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-
-  liquidsoap:
-    build: ./liquidsoap
-    container_name: centovacast-liquidsoap
-    restart: unless-stopped
     depends_on:
       - backend
-      - icecast
-    environment:
-      - BACKEND_URL=http://centovacast-backend:8001
-      - ICECAST_HOST=centovacast-icecast
-      - ICECAST_PORT=8000
-      - ICECAST_PASSWORD=fuente123
-      - MOUNT_POINT=/osaradio
-      - STREAM_ID=6ffc2648-12dc-4b4b-891c-351fcefe4659
-      - API_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbkBjbG9uZXRvdmEubG9jYWwiLCJleHAiOjE4OTM0NTYwMDB9.4PCEwybKjWzjJvZqEPjk3aT9N6RgaZDrh9jNi6BCG9k
-    volumes:
-      - media_data:/app/media
+    networks:
+      - clonetova_default
 
+  # ── Nginx (proxy reverso) ────────────────────────────────────────────────────
   nginx:
     image: nginx:alpine
     container_name: centovacast-nginx
@@ -68,11 +63,51 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - media_data:/var/www/media:ro
     depends_on:
       - frontend
       - backend
+    networks:
+      - clonetova_default
 
+  # ── IceCast KH (compilado arm64) ─────────────────────────────────────────────
+  icecast:
+    build:
+      context: ./icecast
+      dockerfile: Dockerfile
+    container_name: centovacast-icecast
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - icecast_logs:/var/log/icecast
+    networks:
+      - clonetova_default
+
+  # ── Liquidsoap (imagen base — NO corre aquí) ──────────────────────────────────
+  # Esta definición solo sirve para que docker-compose construya la imagen
+  # "clonetova-liquidsoap". El backend la instancia dinámicamente por stream.
+  liquidsoap-builder:
+    build:
+      context: ./liquidsoap
+      dockerfile: Dockerfile
+    image: clonetova-liquidsoap        # ← nombre de imagen que usa el backend
+    container_name: liquidsoap-builder-dummy
+    # No arranca como servicio; solo construye la imagen.
+    command: ["echo", "Imagen lista"]
+    restart: "no"
+    networks:
+      - clonetova_default
+
+# ── Volúmenes ──────────────────────────────────────────────────────────────────
 volumes:
   mongodb_data:
   media_data:
+  icecast_logs:
+
+# ── Red compartida ─────────────────────────────────────────────────────────────
+networks:
+  clonetova_default:
+    driver: bridge
+    name: clonetova_default   # nombre explícito para que el backend lo referencie
