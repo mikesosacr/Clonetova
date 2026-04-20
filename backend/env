@@ -1,0 +1,9 @@
+MONGO_URL=mongodb://admin:admin123@centovacast-mongodb:27017/centovacast?authSource=admin
+DB_NAME=centovacast
+SECRET_KEY=clonetova-super-secret-key-2026
+PUBLIC_IP=141.148.179.210
+ICECAST_HOST=centovacast-icecast
+ICECAST_PORT=8000
+ICECAST_SOURCE_PASSWORD=fuente123
+ICECAST_ADMIN_USER=admin
+ICECAST_ADMIN_PASSWORD=mikesosa110690047
