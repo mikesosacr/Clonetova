@@ -1,17 +1,14 @@
-fastapi==0.110.1
-uvicorn==0.25.0
-motor==3.3.1
-pymongo==4.5.0
-python-dotenv==1.0.1
-pydantic[email]==2.6.4
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.9
-aiofiles==23.2.1
-psutil==5.9.8
-requests==2.31.0
-pytest==8.0.0
-bcrypt==4.0.1
-mutagen
+# backend/requirements.txt
+fastapi
+uvicorn[standard]
+motor              # MongoDB async driver
+pymongo
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
 httpx
-xmltodict>=0.13.0
+requests
+
+# ── Docker SDK — para crear/destruir contenedores Liquidsoap dinámicamente ──
+docker>=7.0.0
+
