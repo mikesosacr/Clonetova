@@ -23,6 +23,8 @@ services:
       - ICECAST_HOST=centovacast-icecast
       - ICECAST_PORT=8000
       - ICECAST_PASSWORD=mikesosa110690047
+    volumes:
+      - media_data:/app/media
 
   frontend:
     build:
@@ -41,6 +43,24 @@ services:
     ports:
       - "8000:8000"
 
+  liquidsoap:
+    build: ./liquidsoap
+    container_name: centovacast-liquidsoap
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - icecast
+    environment:
+      - BACKEND_URL=http://centovacast-backend:8001
+      - ICECAST_HOST=centovacast-icecast
+      - ICECAST_PORT=8000
+      - ICECAST_PASSWORD=fuente123
+      - MOUNT_POINT=/osaradio
+      - STREAM_ID=6ffc2648-12dc-4b4b-891c-351fcefe4659
+      - API_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbkBjbG9uZXRvdmEubG9jYWwiLCJleHAiOjE4OTM0NTYwMDB9.4PCEwybKjWzjJvZqEPjk3aT9N6RgaZDrh9jNi6BCG9k
+    volumes:
+      - media_data:/app/media
+
   nginx:
     image: nginx:alpine
     container_name: centovacast-nginx
@@ -55,3 +75,4 @@ services:
 
 volumes:
   mongodb_data:
+  media_data:

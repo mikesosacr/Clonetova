@@ -925,6 +925,55 @@ async def update_settings(settings: dict, current_user: User = Depends(require_a
     await log_activity("Configuración del servidor actualizada", "settings")
     return {"message": "Configuración guardada"}
 
+@api_router.get("/autodj/next-track")
+async def get_next_track(stream_id: str, current_user: User = Depends(get_current_user)):
+    """
+    Devuelve el próximo track a reproducir para un stream.
+    Liquidsoap llama este endpoint cuando necesita la siguiente canción.
+    Maneja shuffle y rotación de playlist.
+    """
+    # Buscar playlist habilitada para este stream
+    playlist = await db.playlists.find_one({"stream_id": stream_id, "enabled": True})
+    if not playlist or not playlist.get("track_ids"):
+        raise HTTPException(status_code=404, detail="No hay playlist activa con tracks para este stream")
+
+    track_ids = playlist["track_ids"]
+    shuffle = playlist.get("shuffle", True)
+
+    # Estado de reproducción: qué índice vamos
+    state_key = f"playback_{stream_id}"
+    state = await db.playback_state.find_one({"key": state_key})
+    current_index = state.get("index", 0) if state else 0
+
+    if shuffle:
+        import random
+        next_index = random.randint(0, len(track_ids) - 1)
+    else:
+        next_index = current_index % len(track_ids)
+
+    track_id = track_ids[next_index]
+    track = await db.media.find_one({"id": track_id})
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track no encontrado en la base de datos")
+
+    # Guardar estado
+    await db.playback_state.update_one(
+        {"key": state_key},
+        {"$set": {"key": state_key, "index": next_index + 1, "last_track_id": track_id, "updated_at": datetime.utcnow()}},
+        upsert=True
+    )
+
+    await log_activity(f"AutoDJ: reproduciendo '{track.get('title')}' en stream {stream_id}", "autodj")
+
+    return {
+        "file_path": track["file_path"],
+        "title": track.get("title", ""),
+        "artist": track.get("artist", ""),
+        "album": track.get("album", ""),
+        "duration": track.get("duration", 0),
+        "track_id": track_id,
+    }
 # ── App startup ───────────────────────────────────────────────
 app.include_router(api_router)
 
@@ -961,3 +1010,5 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+# ── AutoDJ Next Track ─────────────────────────────────────────
